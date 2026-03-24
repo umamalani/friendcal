@@ -3,6 +3,11 @@
 -- Run this in Supabase Dashboard > SQL Editor
 -- ============================================================
 
+
+-- ============================================================
+-- Core tables
+-- ============================================================
+
 -- Profiles table (extends Supabase auth.users)
 create table public.profiles (
   id uuid references auth.users(id) on delete cascade primary key,
@@ -51,37 +56,77 @@ create table public.invites (
   unique (event_id, user_id)
 );
 
+-- Where each user will be during a date range
+create table public.locations (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  city text not null,
+  country text,
+  start_date date not null,
+  end_date date,
+  label text, -- e.g. "internship", "home", "vacation"
+  created_at timestamptz default now()
+);
+
+-- Internship details
+create table public.internships (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  company text not null,
+  city text not null,
+  country text,
+  start_date date not null,
+  end_date date not null,
+  created_at timestamptz default now()
+);
+
+-- General availability blocks (free/busy date ranges)
+create table public.availability (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  start_date date not null,
+  end_date date not null,
+  status text default 'free' check (status in ('free', 'busy')),
+  note text,
+  created_at timestamptz default now()
+);
+
+
 -- ============================================================
--- Row Level Security (RLS) — keeps data private
+-- Row Level Security (RLS)
+-- Read = any authenticated user
+-- Write = only your own data
+-- Note: disable public signups in Supabase Auth settings so
+-- only invited friends can create accounts.
 -- ============================================================
 
 alter table public.profiles enable row level security;
 alter table public.events enable row level security;
 alter table public.invites enable row level security;
+alter table public.locations enable row level security;
+alter table public.internships enable row level security;
+alter table public.availability enable row level security;
 
--- Profiles: users can read all profiles, only edit their own
-create policy "Profiles are viewable by everyone" on public.profiles
-  for select using (true);
+
+-- Profiles
+create policy "Authenticated users read profiles" on public.profiles
+  for select using (auth.role() = 'authenticated');
 
 create policy "Users can update own profile" on public.profiles
   for update using (auth.uid() = id);
 
--- Events: viewable if you created it or are invited
+
+-- Events
+create policy "Authenticated users read events" on public.events
+  for select using (auth.role() = 'authenticated');
+
 create policy "Creator can manage their events" on public.events
   for all using (auth.uid() = created_by);
 
-create policy "Invited users can view events" on public.events
-  for select using (
-    exists (
-      select 1 from public.invites
-      where invites.event_id = events.id
-      and invites.user_id = auth.uid()
-    )
-  );
 
--- Invites: users can see their own invites, event creators can manage invites
-create policy "Users can view their own invites" on public.invites
-  for select using (auth.uid() = user_id);
+-- Invites
+create policy "Authenticated users read invites" on public.invites
+  for select using (auth.role() = 'authenticated');
 
 create policy "Event creator can manage invites" on public.invites
   for all using (
@@ -94,3 +139,27 @@ create policy "Event creator can manage invites" on public.invites
 
 create policy "Invited users can update their RSVP" on public.invites
   for update using (auth.uid() = user_id);
+
+
+-- Locations
+create policy "Authenticated users read locations" on public.locations
+  for select using (auth.role() = 'authenticated');
+
+create policy "Users manage own locations" on public.locations
+  for all using (auth.uid() = user_id);
+
+
+-- Internships
+create policy "Authenticated users read internships" on public.internships
+  for select using (auth.role() = 'authenticated');
+
+create policy "Users manage own internships" on public.internships
+  for all using (auth.uid() = user_id);
+
+
+-- Availability
+create policy "Authenticated users read availability" on public.availability
+  for select using (auth.role() = 'authenticated');
+
+create policy "Users manage own availability" on public.availability
+  for all using (auth.uid() = user_id);
